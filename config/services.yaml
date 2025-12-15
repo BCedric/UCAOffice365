@@ -4,6 +4,6 @@ services:
     autoconfigure: true
     public: true
 
-  BCedric\DocapostBundle\:
+  BCedric\UCAOffice365\:
     resource: "../src/*"
     exclude: "../src/{Entity,Migrations,Tests,Kernel.php}"
