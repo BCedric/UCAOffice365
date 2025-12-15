@@ -1,0 +1,20 @@
+{
+  "name": "bcedric/uca-office365",
+  "autoload": {
+    "psr-4": {
+      "Bcedric\\UcaOffice365\\": "src/"
+    }
+  },
+  "authors": [
+    {
+      "name": "Cedbois",
+      "email": "cedric.bois@uca.fr"
+    }
+  ],
+  "require": {
+    "symfony/config": ">=6.0",
+    "symfony/http-kernel": ">=6.0",
+    "symfony/dependency-injection": ">=6.0",
+    "symfony/cache": "^7.4"
+  }
+}

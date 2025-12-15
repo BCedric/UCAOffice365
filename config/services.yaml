@@ -1,0 +1,9 @@
+services:
+  _defaults:
+    autowire: true
+    autoconfigure: true
+    public: true
+
+  BCedric\DocapostBundle\:
+    resource: "../src/*"
+    exclude: "../src/{Entity,Migrations,Tests,Kernel.php}"
