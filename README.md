@@ -21,9 +21,14 @@ Bundle de connexion d'une application symfony vers l'api développée en interne
 
 ```
     b_cedric_uca_office365:
-        url: "%env(APIO365_URL)%"
-        login: "%env(APIO365_LOGIN)%"
-        password: "%env(APIO365_PASSWORD)%"
+        uca_api:
+            url: "%env(APIO365_URL)%"
+            login: "%env(APIO365_LOGIN)%"
+            password: "%env(APIO365_PASSWORD)%"
+        graph_api:
+            client: "%env(GRAPH_CLIENT)%"
+            tenant: "%env(GRAPH_TENANT)%"
+            client_secret: "%env(GRAPH_CLIENT_SECRET)%"
 ```
 
 ### Service UCAOffice365
