@@ -18,7 +18,7 @@ use Microsoft\Graph\Model\User;
 use Microsoft\Graph\Model\UserSettings;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-class Office365
+class GraphAPI
 {
     private $tenantId;
     private $clientId;
