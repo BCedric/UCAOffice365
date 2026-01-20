@@ -27,12 +27,15 @@ class GraphAPI
     public $userUrlPrefix = "https://graph.microsoft.com/v1.0/users/";
     private $httpClient;
 
-    public function __construct(string $tenantId, string $clientId, string $clientSecret, HttpClientInterface $client)
-    {
+    public function __construct(
+        string $tenantId,
+        string $clientId,
+        string $clientSecret,
+        private readonly HttpClientInterface $client
+    ) {
         $this->tenantId = $tenantId;
         $this->clientId = $clientId;
         $this->clientSecret = $clientSecret;
-        $this->httpClient = $client;
     }
 
     public function getToken()

@@ -45,9 +45,9 @@ class BCedricUCAOffice365Bundle extends AbstractBundle
         ;
 
         $builder->autowire(GraphApi::class)
-            ->setArgument('$url', $config['uca_api']['url'])
-            ->setArgument('$login', $config['uca_api']['login'])
-            ->setArgument('$password', $config['uca_api']['password'])
+            ->setArgument('$clientId', $config['graph_api']['client'])
+            ->setArgument('$tenantId', $config['graph_api']['tenant'])
+            ->setArgument('$clientSecret', $config['graph_api']['client_secret'])
         ;
     }
 }
