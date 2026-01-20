@@ -17,18 +17,20 @@ Bundle de connexion d'une application symfony vers l'api développée en interne
 
 ```
 
-- créer le fichier `config/packages/b_cedric_uca_office365.yaml` avec le contenu suivant :
+- Pour utiliser le service `BCedric\UCAOffice365\Service\GraphAPI` veuillez définir les variable d'environnement :
 
 ```
-    b_cedric_uca_office365:
-        uca_api:
-            url: "%env(APIO365_URL)%"
-            login: "%env(APIO365_LOGIN)%"
-            password: "%env(APIO365_PASSWORD)%"
-        graph_api:
-            client: "%env(GRAPH_CLIENT)%"
-            tenant: "%env(GRAPH_TENANT)%"
-            client_secret: "%env(GRAPH_CLIENT_SECRET)%"
+    GRAPH_TENANT=""
+    GRAPH_CLIENT=""
+    GRAPH_CLIENT_SECRET=""
+```
+
+- Pour utiliser le service `BCedric\UCAOffice365\Service\UCAOffice365` veuillez définir les variable d'environnement :
+
+```
+    APIO365_URL=""
+    APIO365_LOGIN=""
+    APIO365_PASSWORD=""
 ```
 
 ### Service UCAOffice365
