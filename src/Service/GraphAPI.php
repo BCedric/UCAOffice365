@@ -21,22 +21,16 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 class GraphAPI
 {
-    private $tenantId;
-    private $clientId;
-    private $clientSecret;
     private $token;
     public $userUrlPrefix = "https://graph.microsoft.com/v1.0/users/";
     private $httpClient;
 
     public function __construct(
-        #[Autowire(env: 'GRAPH_TENANT')] string $tenantId,
-        #[Autowire(env: 'GRAPH_CLIENT')] string $clientId,
-        #[Autowire(env: 'GRAPH_CLIENT_SECRET')] string $clientSecret,
+        #[Autowire(env: 'GRAPH_TENANT')] private readonly string $tenantId,
+        #[Autowire(env: 'GRAPH_CLIENT')] private readonly string $clientId,
+        #[Autowire(env: 'GRAPH_CLIENT_SECRET')] private readonly string $clientSecret,
         private readonly HttpClientInterface $client
     ) {
-        $this->tenantId = $tenantId;
-        $this->clientId = $clientId;
-        $this->clientSecret = $clientSecret;
     }
 
     public function getToken()
