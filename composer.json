@@ -15,6 +15,13 @@
     "symfony/config": ">=5.4",
     "symfony/http-kernel": ">=5.4",
     "symfony/dependency-injection": ">=5.4",
-    "symfony/cache": ">=5.4"
+    "symfony/cache": ">=5.4",
+    "microsoft/microsoft-graph": "^2.54"
+  },
+  "config": {
+    "allow-plugins": {
+      "php-http/discovery": false,
+      "tbachert/spi": false
+    }
   }
 }
