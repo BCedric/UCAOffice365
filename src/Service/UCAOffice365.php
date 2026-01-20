@@ -3,6 +3,7 @@
 namespace BCedric\UCAOffice365\Service;
 
 use Symfony\Component\Cache\Adapter\FilesystemAdapter;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\Cache\ItemInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -12,9 +13,9 @@ class UCAOffice365
 
     public function __construct(
         private readonly HttpClientInterface $httpClient,
-        private readonly string $url,
-        private readonly string $login,
-        private readonly string $password,
+        #[Autowire(env: 'APIO365_URL')] private readonly string $url,
+        #[Autowire(env: 'APIO365_LOGIN')] private readonly string $login,
+        #[Autowire(env: 'APIO365_PASSWORD')] private readonly string $password,
 
     ) {}
 

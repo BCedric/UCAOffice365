@@ -16,6 +16,7 @@ use Microsoft\Graph\Model\MeetingParticipants;
 use Microsoft\Graph\Model\OnlineMeeting;
 use Microsoft\Graph\Model\User;
 use Microsoft\Graph\Model\UserSettings;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 class GraphAPI
@@ -28,9 +29,9 @@ class GraphAPI
     private $httpClient;
 
     public function __construct(
-        string $tenantId,
-        string $clientId,
-        string $clientSecret,
+        #[Autowire(env: 'GRAPH_TENANT')] string $tenantId,
+        #[Autowire(env: 'GRAPH_CLIENT')] string $clientId,
+        #[Autowire(env: 'GRAPH_CLIENT_SECRET')] string $clientSecret,
         private readonly HttpClientInterface $client
     ) {
         $this->tenantId = $tenantId;
