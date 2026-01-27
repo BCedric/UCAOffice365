@@ -5,7 +5,7 @@ Bundle de connexion d'une application symfony vers l'api développée en interne
 ## Installation
 
 - Lancer la commande `composer require bcedric/uca-office365:dev-main`
-- Ajouter le bundle dans `config/bundle.php` :
+- Vérifier que le bundle a été ajouté dans `config/bundle.php` :
 
 ```
     <?php
