@@ -1,5 +1,6 @@
 {
   "name": "bcedric/uca-office365",
+  "type": "symfony-bundle",
   "autoload": {
     "psr-4": {
       "BCedric\\UCAOffice365\\": "src/"
@@ -17,6 +18,12 @@
     "symfony/dependency-injection": ">=5.4",
     "symfony/cache": ">=5.4",
     "microsoft/microsoft-graph": "^2.54"
+  },
+  "extra": {
+    "symfony": {
+      "allow-contrib": false,
+      "require": ">=5.4"
+    },
   },
   "config": {
     "allow-plugins": {
