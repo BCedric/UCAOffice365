@@ -2,7 +2,7 @@
   "name": "bcedric/uca-office365",
   "autoload": {
     "psr-4": {
-      "Bcedric\\UcaOffice365\\": "src/"
+      "BCedric\\UCAOffice365\\": "src/"
     }
   },
   "authors": [
