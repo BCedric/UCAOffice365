@@ -19,12 +19,6 @@
     "symfony/cache": ">=5.4",
     "microsoft/microsoft-graph": "^2.54"
   },
-  "extra": {
-    "symfony": {
-      "allow-contrib": false,
-      "require": ">=5.4"
-    }
-  },
   "config": {
     "allow-plugins": {
       "php-http/discovery": false,
