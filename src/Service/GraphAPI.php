@@ -4,24 +4,28 @@ namespace BCedric\UCAOffice365\Service;
 
 use DateTime;
 use Exception;
-use Microsoft\Graph\Graph;
-use Microsoft\Graph\Model\AssignedLicense;
-use Microsoft\Graph\Model\Entity;
-use Microsoft\Graph\Model\Group;
-use Microsoft\Graph\Model\Identity;
-use Microsoft\Graph\Model\IdentitySet;
-use Microsoft\Graph\Model\LicenseDetails;
-use Microsoft\Graph\Model\MeetingParticipantInfo;
-use Microsoft\Graph\Model\MeetingParticipants;
-use Microsoft\Graph\Model\OnlineMeeting;
-use Microsoft\Graph\Model\User;
-use Microsoft\Graph\Model\UserSettings;
+use Microsoft\Graph\GraphServiceClient;
+use Microsoft\Kiota\Abstractions\ApiException;
+use Microsoft\Kiota\Authentication\Oauth\ClientCredentialContext;
+use Microsoft\Graph\Generated\Models\AssignedLicense;
+use Microsoft\Graph\Generated\Models\Entity;
+use Microsoft\Graph\Generated\Models\Group;
+use Microsoft\Graph\Generated\Models\Identity;
+use Microsoft\Graph\Generated\Models\IdentitySet;
+use Microsoft\Graph\Generated\Models\LicenseDetails;
+use Microsoft\Graph\Generated\Models\MeetingParticipantInfo;
+use Microsoft\Graph\Generated\Models\MeetingParticipants;
+use Microsoft\Graph\Generated\Models\OnlineMeeting;
+use Microsoft\Graph\Generated\Models\User;
+use Microsoft\Graph\Generated\Models\UserSettings;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Microsoft\Graph\Generated\Drives\Item\Items\Item\Children\ChildrenRequestBuilderGetRequestConfiguration;
+use Microsoft\Graph\Generated\Drives\Item\Items\Item\Children\ChildrenRequestBuilderGetQueryParameters;
 
 class GraphAPI
 {
-    private $token;
+    private ?GraphServiceClient $graphServiceClient = null;
     public $userUrlPrefix = "https://graph.microsoft.com/v1.0/users/";
     private $httpClient;
 
@@ -33,120 +37,153 @@ class GraphAPI
     ) {
     }
 
-    public function getToken()
+    public function getGraphServiceClient(): GraphServiceClient
     {
-        if (is_null($this->token)) {
-            $this->token = $this->generateToken();
-        } elseif ($this->token->expires_on <= time()) {
-            $this->token = $this->generateToken();
+        if (is_null($this->graphServiceClient)) {
+            $tokenRequestContext = new ClientCredentialContext(
+                $this->tenantId,
+                $this->clientId,
+                $this->clientSecret
+            );
+            $this->graphServiceClient = new GraphServiceClient($tokenRequestContext);
         }
 
-        return $this->token;
+        return $this->graphServiceClient;
     }
 
     /**
-     * @return mixed
-     * @throws Exception
+     * @deprecated
      */
-    public function generateToken()
+    public function getGraphApi()
     {
-        $url = 'https://login.microsoftonline.com/' . $this->tenantId . '/oauth2/token?api-version=1.0';
+        return $this->getGraphServiceClient();
+    }
 
+    public function getUser($email) : User
+    {
         try {
-            $options = [
-                'body' => [
-                    'client_id' => $this->clientId,
-                    'client_secret' => $this->clientSecret,
-                    'resource' => 'https://graph.microsoft.com/',
-                    'grant_type' => 'client_credentials',
-                ],
-            ];
+            $graphServiceClient = $this->getGraphServiceClient();
+            try {
+                $user = $graphServiceClient->users()->byUserId($email)->get()->wait();
+                return $user;
+            } catch (ApiException $ex) {
+               throw $ex;
+            }
+        } catch (ApiException $exception) {
+            throw $exception;
+        }
+    }
 
-            if (isset($_ENV['PROXY_URL'])) {
-                $options['proxy'] = $_ENV['PROXY_URL'];
+
+    public function getSharepointTeam(string $userId) : \Microsoft\Graph\Generated\Models\DirectoryObjectCollectionResponse
+    {
+        try {
+            $graphServiceClient = $this->getGraphServiceClient();
+
+            $requestConfiguration = new \Microsoft\Graph\Generated\Users\Item\OwnedObjects\OwnedObjectsRequestBuilderGetRequestConfiguration();
+            $requestConfiguration->queryParameters = new \Microsoft\Graph\Generated\Users\Item\OwnedObjects\OwnedObjectsRequestBuilderGetQueryParameters();
+            $requestConfiguration->queryParameters->select = ['id', 'displayName'];
+
+            $ownedObjects = $graphServiceClient->users()->byUserId($userId)->ownedObjects()->get($requestConfiguration)->wait();
+            return $ownedObjects;
+        } catch (ApiException $exception) {
+            throw $exception;
+        }
+    }
+
+    public function getArrayOfTeams($sharePointList) : array
+    {
+        $teamsList = [];
+        if(!empty($sharePointList)) {
+            foreach ($sharePointList->getValue() as $sharepoint) {
+                $teamsList[] = array('displayName' => $sharepoint->getDisplayName(), 'id' => $sharepoint->getId());
+            }
+        }
+        return $teamsList;
+    }
+
+    public function getPersonnalDriveId($userId)
+    {
+        $client = $this->getGraphServiceClient();
+        try {
+            $drive = $client->users()->byUserId($userId)->drive()->get()->wait();
+            $driveId = $drive->getId();
+            return $driveId;
+        } catch (\Throwable $e) {
+            return new Exception($e);
+        }
+    }
+
+    public function getDriveId($groupId)
+    {
+        $client = $this->getGraphServiceClient();
+        try {
+            $drive = $client->groups()->byGroupId($groupId)->drive()->get()->wait();
+            $driveId = $drive->getId();
+        } catch (\Throwable $e) {
+            return new Exception($e);
+        }
+
+        return $driveId;
+    }
+
+
+    public function getSharepointDriveVideos(string $driveId): array| Exception
+    {
+        $client = $this->getGraphServiceClient();
+        try {
+            return $this->browseDrive($client, $driveId);
+        } catch (\Throwable $e) {
+            return new Exception($e);
+        }
+
+    }
+
+    private function browseDrive(
+        \Microsoft\Graph\GraphServiceClient $client,
+        string $driveId,
+    ): array {
+        $files = [];
+        $items = $client
+            ->drives()
+            ->byDriveId($driveId)
+            ->items()
+            ->byDriveItemId('root')
+            ->searchWithQ('.mp4')
+            ->get()
+            ->wait();
+
+        foreach ($items->getValue() as $item) {
+            $files[] = array('shareId' => $driveId, 'mediaName' => $item->getName(), 'mediaDate' => $item->getCreatedDateTime(), 'mediaId' => $item->getId(), 'mediaURL' => $item->getWebUrl());
+        }
+
+        return $files;
+    }
+
+    public function getMediaContentFromDrive(string $driveId, string $mediaId)
+    {
+        $client = $this->getGraphServiceClient();
+        try {
+            $driveItem = $client->drives()->byDriveId($driveId)->items()->byDriveItemId($mediaId)->get()->wait();
+            // Download Url not the WebUrl
+            $additionalData = $driveItem->getAdditionalData();
+            if (isset($additionalData['@microsoft.graph.downloadUrl'])) {
+                return $additionalData['@microsoft.graph.downloadUrl'];
             }
 
-            $response = $this->httpClient->request('POST', $url, $options);
-            $token = json_decode($response->getContent());
-            return $token;
-        } catch (Exception $exception) {
-            throw $exception;
+        } catch (\Throwable $e) {
+            return new Exception($e);
         }
     }
 
-    public function getGraphApi($version = "v1.0")
-    {
-        $graph = new Graph();
-        if (isset($_ENV['PROXY_URL'])) {
-            $graph->setProxyPort($_ENV['PROXY_URL']);
-        }
+    /** DEPRECATED **/
 
-        $graph->setApiVersion($version);
-        $graph->setAccessToken($this->getToken()->access_token);
-        return $graph;
-    }
-
-    public function getUser($email)
+    public function getSharepointOwner($groupId)
     {
-        $queryParams = array(
-            '$filter' => "userPrincipalName eq '$email' or mail eq '$email'",
-        );
-        $url = '/users?' . http_build_query($queryParams);
+        $url = "/groups/" . $groupId . "/owners";
         try {
             $graph = $this->getGraphApi();
-            return $graph->createRequest("GET", $url)->setReturnType(User::class)->execute();
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getUserSettings($email)
-    {
-        $queryParams = array(
-            '$filter' => "userPrincipalName eq '$email' or mail eq '$email'",
-        );
-        $url = '/users/' . $this->getUserId($email) . '/settings';
-        try {
-            $graph = $this->getGraphApi();
-            return $graph->createRequest("GET", $url)->setReturnType(UserSettings::class)->execute();
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getUserMailboxSettings($email)
-    {
-        $url = '/users/' . $email . '/mailboxSettings';
-        try {
-            $graph = $this->getGraphApi();
-            return $graph->createRequest("GET", $url)->setReturnType(UserSettings::class)->execute();
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getUserLicenseDetails($userId)
-    {
-        $url = '/users/' . $userId . '/licenseDetails';
-        try {
-            $graph = $this->getGraphApi();
-            return $graph->createRequest("GET", $url)->setReturnType(LicenseDetails::class)->execute();
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getUserCalendars($email, $limitDate)
-    {
-
-        $url = '/users/' . $email . "/events?" . '$filter' . "=start/dateTime ge '$limitDate'";
-
-        try {
-            $graph = $this->getGraphApi();
-            $response = $graph->createRequest("GET", $url . '&$count=true')->execute();
-            $resBody = $response->getBody();
-            $count = $resBody['@odata.count'];
-            return $graph->createRequest("GET", $url . '&$top=' . $count)->execute();
+            return $graph->createRequest("GET", $url)->execute();
         } catch (Exception $exception) {
             throw $exception;
         }
@@ -158,20 +195,6 @@ class GraphAPI
         try {
             $graph = $this->getGraphApi();
             return $graph->createRequest("GET", $url)->execute();
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getUserAssignedLicenses($email)
-    {
-        $queryParams = array(
-            '$filter' => "userPrincipalName eq '$email' or mail eq '$email'",
-        );
-        $url = '/users/' . $this->getUserId($email) . '/assignedLicenses';
-        try {
-            $graph = $this->getGraphApi();
-            return $graph->createRequest("GET", $url)->setReturnType(AssignedLicense::class)->execute();
         } catch (Exception $exception) {
             throw $exception;
         }
@@ -205,101 +228,6 @@ class GraphAPI
             return ($user[0]) ? $user[0]->getId() : null;
         } catch (Exception $exception) {
             // error_log("[" . date("Y-m-d H:i:s") . "] " . $email . " - ERROR: " . $exception->getResponse()->getBody()->getContents() . "\n", 3, $CFG->dataroot . '/clfd/ucateams.log');
-            throw $exception;
-        }
-    }
-
-    public function getSharepointTeam(string $userId)
-    {
-        $select = '$select';
-        $url = "/users/" . $userId . "/ownedObjects?$select=id,displayName";
-        try {
-            $graph = $this->getGraphApi();
-            return $graph->createRequest("GET", $url)->execute();
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getSharepointOwner($groupId)
-    {
-        $url = "/groups/" . $groupId . "/owners";
-        try {
-            $graph = $this->getGraphApi();
-            return $graph->createRequest("GET", $url)->execute();
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getSharepointDrive(string $sharepointId)
-    {
-        $select = '$select';
-        $url = "/groups/" . $sharepointId . "/drive/root/search(q='.mp4')?$select=id,name,createdDateTime,webUrl";
-        try {
-            $graph = $this->getGraphApi();
-            return $graph->createRequest("GET", $url)->execute();
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getPersonnalSharepointDrive(string $user)
-    {
-        $select = '$select';
-        $url = "/users/" . $user . "/drive/root/search(q='.mp4')?$select=id,name,createdDateTime,webUrl";
-        try {
-            $graph = $this->getGraphApi();
-            return $graph->createRequest("GET", $url)->execute();
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getSharepointDriveId(string $sharepointId)
-    {
-        $url = "/groups/" . $sharepointId . "/drive/root/";
-        try {
-            $graph = $this->getGraphApi();
-            $driveInfo = $graph->createRequest("GET", $url)->execute();
-            return $driveInfo->getBody()['parentReference']['driveId'];
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getPersonnalSharepointDriveId(string $userId)
-    {
-        $url = "/users/" . $userId . "/drive/root/";
-        try {
-            $graph = $this->getGraphApi();
-            $driveInfo = $graph->createRequest("GET", $url)->execute();
-            return $driveInfo->getBody()['parentReference']['driveId'];
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getMediaContentFromDrive(string $driveId, string $mediaId)
-    {
-        $url = "/drives/" . $driveId . "/items/" . $mediaId;
-        try {
-            $graph = $this->getGraphApi();
-            $driveInfo = $graph->createRequest("GET", $url)->execute();
-            return $driveInfo->getBody()['@microsoft.graph.downloadUrl'];
-        } catch (Exception $exception) {
-            throw $exception;
-        }
-    }
-
-    public function getMediaUrlFromDrive(string $driveId, string $mediaId)
-    {
-        $url = "/drives/" . $driveId . "/items/" . $mediaId;
-        try {
-            $graph = $this->getGraphApi();
-            $driveInfo = $graph->createRequest("GET", $url)->execute();
-            return $driveInfo->getBody()['webUrl'];
-        } catch (Exception $exception) {
             throw $exception;
         }
     }
