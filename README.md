@@ -5,7 +5,7 @@ Bundle de connexion d'une application symfony vers l'api développée en interne
 ## Installation
 
 - Lancer la commande `composer require bcedric/uca-office365:dev-main`
-- Vérifier que le bundle a été ajouté dans `config/bundle.php` :
+- Ajoutez la ligne suivante dans le fichier `config/bundle.php` :
 
 ```
     <?php
@@ -23,6 +23,7 @@ Bundle de connexion d'une application symfony vers l'api développée en interne
     GRAPH_TENANT=""
     GRAPH_CLIENT=""
     GRAPH_CLIENT_SECRET=""
+    PROXY_URL=""
 ```
 
 - Pour utiliser le service `BCedric\UCAOffice365\Service\UCAOffice365` veuillez définir les variable d'environnement :

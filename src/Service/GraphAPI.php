@@ -22,18 +22,19 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Microsoft\Graph\Generated\Drives\Item\Items\Item\Children\ChildrenRequestBuilderGetRequestConfiguration;
 use Microsoft\Graph\Generated\Drives\Item\Items\Item\Children\ChildrenRequestBuilderGetQueryParameters;
+use Microsoft\Graph\Core\Authentication\GraphPhpLeagueAuthenticationProvider;
+use Microsoft\Graph\Core\GraphClientFactory;
+use Microsoft\Graph\GraphRequestAdapter;
 
 class GraphAPI
 {
     private ?GraphServiceClient $graphServiceClient = null;
     public $userUrlPrefix = "https://graph.microsoft.com/v1.0/users/";
-    private $httpClient;
 
     public function __construct(
         #[Autowire(env: 'GRAPH_TENANT')] private readonly string $tenantId,
         #[Autowire(env: 'GRAPH_CLIENT')] private readonly string $clientId,
         #[Autowire(env: 'GRAPH_CLIENT_SECRET')] private readonly string $clientSecret,
-        private readonly HttpClientInterface $client
     ) {
     }
 
@@ -45,7 +46,13 @@ class GraphAPI
                 $this->clientId,
                 $this->clientSecret
             );
-            $this->graphServiceClient = new GraphServiceClient($tokenRequestContext);
+            $authProvider = new GraphPhpLeagueAuthenticationProvider($tokenRequestContext);
+            $guzzleConfig = [
+                'proxy' => isset($_ENV['PROXY_URL']) ? $_ENV['PROXY_URL'] : null,
+            ];
+            $httpClient = GraphClientFactory::createWithConfig($guzzleConfig);
+            $requestAdapter = new GraphRequestAdapter($authProvider, $httpClient);
+            $this->graphServiceClient = GraphServiceClient::createWithRequestAdapter($requestAdapter);
         }
 
         return $this->graphServiceClient;
@@ -140,7 +147,7 @@ class GraphAPI
     }
 
     private function browseDrive(
-        \Microsoft\Graph\GraphServiceClient $client,
+        GraphServiceClient $client,
         string $driveId,
     ): array {
         $files = [];
@@ -154,7 +161,9 @@ class GraphAPI
             ->wait();
 
         foreach ($items->getValue() as $item) {
-            $files[] = array('shareId' => $driveId, 'mediaName' => $item->getName(), 'mediaDate' => $item->getCreatedDateTime(), 'mediaId' => $item->getId(), 'mediaURL' => $item->getWebUrl());
+            $createdDateTime = $item->getCreatedDateTime();
+            $mediaDate = $createdDateTime ? $createdDateTime->format('d/m/Y') : '';
+            $files[] = array('shareId' => $driveId, 'mediaName' => $item->getName(), 'mediaDate' => $mediaDate, 'mediaId' => $item->getId(), 'mediaURL' => $item->getWebUrl());
         }
 
         return $files;
@@ -171,6 +180,7 @@ class GraphAPI
                 return $additionalData['@microsoft.graph.downloadUrl'];
             }
 
+            return null;
         } catch (\Throwable $e) {
             return new Exception($e);
         }
