@@ -25,6 +25,8 @@ use Microsoft\Graph\Generated\Drives\Item\Items\Item\Children\ChildrenRequestBui
 use Microsoft\Graph\Core\Authentication\GraphPhpLeagueAuthenticationProvider;
 use Microsoft\Graph\Core\GraphClientFactory;
 use Microsoft\Graph\GraphRequestAdapter;
+use \Microsoft\Graph\Generated\Users\Item\OwnedObjects\OwnedObjectsRequestBuilderGetRequestConfiguration;
+use \Microsoft\Graph\Generated\Users\Item\OwnedObjects\OwnedObjectsRequestBuilderGetQueryParameters;
 
 class GraphAPI
 {
@@ -87,8 +89,8 @@ class GraphAPI
         try {
             $graphServiceClient = $this->getGraphServiceClient();
 
-            $requestConfiguration = new \Microsoft\Graph\Generated\Users\Item\OwnedObjects\OwnedObjectsRequestBuilderGetRequestConfiguration();
-            $requestConfiguration->queryParameters = new \Microsoft\Graph\Generated\Users\Item\OwnedObjects\OwnedObjectsRequestBuilderGetQueryParameters();
+            $requestConfiguration = new OwnedObjectsRequestBuilderGetRequestConfiguration();
+            $requestConfiguration->queryParameters = new OwnedObjectsRequestBuilderGetQueryParameters();
             $requestConfiguration->queryParameters->select = ['id', 'displayName'];
 
             $ownedObjects = $graphServiceClient->users()->byUserId($userId)->ownedObjects()->get($requestConfiguration)->wait();
@@ -161,9 +163,7 @@ class GraphAPI
             ->wait();
 
         foreach ($items->getValue() as $item) {
-            $createdDateTime = $item->getCreatedDateTime();
-            $mediaDate = $createdDateTime ? $createdDateTime->format('d/m/Y') : '';
-            $files[] = array('shareId' => $driveId, 'mediaName' => $item->getName(), 'mediaDate' => $mediaDate, 'mediaId' => $item->getId(), 'mediaURL' => $item->getWebUrl());
+            $files[] = array('shareId' => $driveId, 'mediaName' => $item->getName(), 'mediaDate' => $item->getCreatedDateTime(), 'mediaId' => $item->getId(), 'mediaURL' => $item->getWebUrl());
         }
 
         return $files;
