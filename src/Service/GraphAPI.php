@@ -23,10 +23,15 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Microsoft\Graph\Generated\Drives\Item\Items\Item\Children\ChildrenRequestBuilderGetRequestConfiguration;
 use Microsoft\Graph\Generated\Drives\Item\Items\Item\Children\ChildrenRequestBuilderGetQueryParameters;
 use Microsoft\Graph\Core\Authentication\GraphPhpLeagueAuthenticationProvider;
+use Microsoft\Graph\Core\Authentication\GraphPhpLeagueAccessTokenProvider;
 use Microsoft\Graph\Core\GraphClientFactory;
 use Microsoft\Graph\GraphRequestAdapter;
+use Microsoft\Kiota\Authentication\Oauth\ProviderFactory;
+use Microsoft\Kiota\Authentication\PhpLeagueAuthenticationProvider;
 use \Microsoft\Graph\Generated\Users\Item\OwnedObjects\OwnedObjectsRequestBuilderGetRequestConfiguration;
 use \Microsoft\Graph\Generated\Users\Item\OwnedObjects\OwnedObjectsRequestBuilderGetQueryParameters;
+use GuzzleHttp\Client as GuzzleClient;
+use League\OAuth2\Client\Provider\GenericProvider;
 
 class GraphAPI
 {
@@ -37,6 +42,7 @@ class GraphAPI
         #[Autowire(env: 'GRAPH_TENANT')] private readonly string $tenantId,
         #[Autowire(env: 'GRAPH_CLIENT')] private readonly string $clientId,
         #[Autowire(env: 'GRAPH_CLIENT_SECRET')] private readonly string $clientSecret,
+        #[Autowire(env: 'PROXY_URL')] private readonly ?string $proxyUrl = null,
     ) {
     }
 
@@ -48,13 +54,61 @@ class GraphAPI
                 $this->clientId,
                 $this->clientSecret
             );
-            $authProvider = new GraphPhpLeagueAuthenticationProvider($tokenRequestContext);
-            $guzzleConfig = [
-                'proxy' => isset($_ENV['PROXY_URL']) ? $_ENV['PROXY_URL'] : null,
+
+            $config = [
+                'verify' => true,
+                'timeout' => 30
             ];
-            $httpClient = GraphClientFactory::createWithConfig($guzzleConfig);
-            $requestAdapter = new GraphRequestAdapter($authProvider, $httpClient);
-            $this->graphServiceClient = GraphServiceClient::createWithRequestAdapter($requestAdapter);
+
+            // Add proxy configuration if proxy URL is provided
+            if (!empty($this->proxyUrl)) {
+                $config['proxy'] = [
+                    'http' => $this->proxyUrl,
+                    'https' => $this->proxyUrl
+                ];
+            }
+
+            $httpClient = GraphClientFactory::createWithConfig($config);
+            $guzzleClientForOAuth = new GuzzleClient($config);
+            $providerOptions = [
+                'clientId' => $this->clientId,
+                'clientSecret' => $this->clientSecret,
+                'redirectUri' => '',
+                'urlAuthorize' => "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/authorize",
+                'urlAccessToken' => "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/token",
+                'urlResourceOwnerDetails' => "https://graph.microsoft.com/oidc/userinfo",
+                'scopes' => 'https://graph.microsoft.com/.default',
+                'verify' => true,
+                'timeout' => 30
+            ];
+
+            // Required proxy settings for OAuth provider specificaly if proxy URL is provided. Microsoft issue.
+            if (!empty($this->proxyUrl)) {
+                $providerOptions['proxy'] = [
+                    'http' => $this->proxyUrl,
+                    'https' => $this->proxyUrl
+                ];
+            }
+            $oauthProvider = new GenericProvider($providerOptions, [
+                'httpClient' => $guzzleClientForOAuth
+            ]);
+
+            $accessTokenProvider = new GraphPhpLeagueAccessTokenProvider(
+                $tokenRequestContext,
+                ["https://graph.microsoft.com/.default"],
+                \Microsoft\Graph\Core\NationalCloud::GLOBAL,
+                null,
+                $oauthProvider
+            );
+
+            $authProvider = PhpLeagueAuthenticationProvider::createWithAccessTokenProvider($accessTokenProvider);
+            $this->graphServiceClient = GraphServiceClient::createWithRequestAdapter(
+                new GraphRequestAdapter(
+                    $authProvider,
+                    $httpClient
+                )
+            );
+
         }
 
         return $this->graphServiceClient;
@@ -70,16 +124,12 @@ class GraphAPI
 
     public function getUser($email) : User
     {
+        $graphServiceClient = $this->getGraphServiceClient();
         try {
-            $graphServiceClient = $this->getGraphServiceClient();
-            try {
-                $user = $graphServiceClient->users()->byUserId($email)->get()->wait();
-                return $user;
-            } catch (ApiException $ex) {
-               throw $ex;
-            }
-        } catch (ApiException $exception) {
-            throw $exception;
+            $user = $graphServiceClient->users()->byUserId($email)->get()->wait();
+            return $user;
+        } catch (ApiException $ex) {
+            throw $ex;
         }
     }
 
