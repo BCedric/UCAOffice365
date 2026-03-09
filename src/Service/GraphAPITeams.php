@@ -5,7 +5,9 @@ namespace BCedric\UCAOffice365\Service;
 use Exception;
 use Microsoft\Graph\Core\Authentication\GraphPhpLeagueAccessTokenProvider;
 use Microsoft\Graph\Core\GraphClientFactory;
+use Microsoft\Graph\Generated\Models\Group;
 use Microsoft\Graph\Generated\Models\OnlineMeeting;
+use Microsoft\Graph\Generated\Models\User;
 use Microsoft\Graph\GraphRequestAdapter;
 use Microsoft\Graph\GraphServiceClient;
 use Microsoft\Kiota\Authentication\Oauth\ClientCredentialContext;
@@ -141,6 +143,123 @@ class GraphAPITeams
         } catch (\Throwable $e) {
             throw new Exception($e->getMessage(), (int)$e->getCode(), $e);
         }
+    }
+
+    public function getUserId(string $email): ?string
+    {
+        $email = strtolower(trim($email));
+        if ($email === '') {
+            return null;
+        }
+
+        $response = $this->legacyRequest('GET', "users/$email?\$select=id");
+        $data = $this->graphResponseToArray($response);
+        if (!empty($data['id'])) {
+            return (string)$data['id'];
+        }
+
+        $query = http_build_query([
+            '$filter' => "userPrincipalName eq '$email' or mail eq '$email'",
+        ]);
+        $fallback = $this->legacyRequest('GET', "users?$query", [], 'v1.0', User::class);
+
+        if (is_array($fallback) && isset($fallback[0]) && method_exists($fallback[0], 'getId')) {
+            return $fallback[0]->getId();
+        }
+
+        $arr = $this->graphResponseToArray($fallback);
+        return $arr['value'][0]['id'] ?? null;
+    }
+
+    public function createTeam(string $groupId, array $memberSettings = []): mixed
+    {
+        $parameters = ['memberSettings' => $memberSettings];
+        if (empty($parameters['memberSettings'])) {
+            $parameters['memberSettings'] = [
+                'allowCreateUpdateChannels' => false,
+                'allowDeleteChannels' => false,
+                'allowAddRemoveApps' => false,
+                'allowCreateUpdateRemoveTabs' => false,
+                'allowCreateUpdateRemoveConnectors' => false,
+            ];
+        }
+
+        return $this->legacyRequest(
+            'PUT',
+            "/groups/$groupId/team",
+            json_decode(json_encode($parameters), true),
+            'v1.0',
+            Group::class
+        );
+    }
+
+    public function createGroup(string $name, string $description, array|string $ownersId): ?string
+    {
+        $users = [];
+        foreach ((array)$ownersId as $ownerId) {
+            $users[] = $this->userUrlPrefix . $ownerId;
+        }
+
+        $group = new Group();
+        $group->setDisplayName($name);
+        $group->setMailNickname(preg_replace('/[^A-Za-z0-9]/', '', $name) . uniqid());
+        $group->setDescription($description);
+        $group->setVisibility('Private');
+        $group->setGroupTypes(['Unified']);
+        $group->setMailEnabled(true);
+        $group->setSecurityEnabled(false);
+        $group->setOwners($users);
+        $group->setMembers($users);
+
+        $data = $group->jsonSerialize();
+        $data['owners@odata.bind'] = $data['owners'];
+        $data['members@odata.bind'] = $data['members'];
+        $data['resourceBehaviorOptions'] = ['WelcomeEmailDisabled'];
+
+        unset($data['owners'], $data['members']);
+
+        $response = $this->legacyRequest('POST', '/groups', $data, 'v1.0', Group::class);
+        return method_exists($response, 'getId') ? $response->getId() : null;
+    }
+
+    public function readTeam(string $groupId): mixed
+    {
+        return $this->legacyRequest('GET', "/groups/$groupId/team", [], 'v1.0', Group::class);
+    }
+
+    public function copyTeam(string $team, string $name, string $description, array|string $ownersId): mixed
+    {
+        $users = [];
+        foreach ((array)$ownersId as $ownerId) {
+            $users[] = $this->userUrlPrefix . $ownerId;
+        }
+
+        $group = new Group();
+        $group->setDisplayName($name);
+        $group->setMailNickname(preg_replace('/[^A-Za-z0-9]/', '', $name) . uniqid());
+        $group->setDescription($description);
+        $group->setVisibility('Private');
+        $group->setOwners($users);
+
+        $data = $group->jsonSerialize();
+        $data['partsToClone'] = 'apps,tabs,settings,channels';
+        $data['resourceBehaviorOptions'] = ['WelcomeEmailDisabled'];
+        unset($data['owners']);
+
+        $response = $this->legacyRequest('POST', "/teams/$team/clone", $data);
+
+        if ($response && method_exists($response, 'getHeaders')) {
+            $headers = $response->getHeaders();
+            if (!empty($headers['Location'][0])) {
+                $location = $headers['Location'][0];
+                $teamid = explode("'", explode('/', $location)[1])[1] ?? null;
+                if (!empty($teamid)) {
+                    return $this->readTeam((string)$teamid);
+                }
+            }
+        }
+
+        return $response;
     }
 
     public function listGroupMemberIdSet(string $groupId): array
