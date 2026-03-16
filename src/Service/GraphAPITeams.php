@@ -181,25 +181,49 @@ class GraphAPITeams
             ];
         }
 
-        $response = $this->legacyRequest('POST', "users/$userId/onlineMeetings", $body, 'beta');
+        $response = $this->legacyRequest('POST', "users/$userId/onlineMeetings", $body, 'v1.0');
         $data = $this->graphResponseToArray($response);
         return $this->arrayToOnlineMeeting($data);
     }
 
     public function getAttendanceRecords(string $organizerId, string $meetingId): array
     {
-        $path = "users/$organizerId/onlineMeetings/$meetingId/attendanceReports?\$expand=attendanceRecords";
-        $response = $this->legacyRequest('GET', $path, [], 'beta');
-        $data = $this->graphResponseToArray($response);
+        $client = $this->getGraphServiceClient();
 
         $records = [];
-        foreach (($data['value'] ?? []) as $report) {
-            if (!empty($report['attendanceRecords']) && is_array($report['attendanceRecords'])) {
-                $records = array_merge($records, $report['attendanceRecords']);
-            }
-        }
+        try {
+            $reports = $client
+                ->users()
+                ->byUserId($organizerId)
+                ->onlineMeetings()
+                ->byOnlineMeetingId($meetingId)
+                ->attendanceReports()
+                ->get()
+                ->wait();
 
-        return $records;
+            if (!empty($reports) && method_exists($reports, 'getValue')) {
+                foreach (($reports->getValue() ?? []) as $report) {
+                    $attendanceRecords = method_exists($report, 'getAttendanceRecords') ? $report->getAttendanceRecords() : [];
+                    if (!empty($attendanceRecords)) {
+                        $records = array_merge($records, json_decode(json_encode($attendanceRecords), true) ?? []);
+                    }
+                }
+            }
+
+            return $records;
+        } catch (\Throwable $e) {
+            $path = "users/$organizerId/onlineMeetings/$meetingId/attendanceReports?\$expand=attendanceRecords";
+            $response = $this->legacyRequest('GET', $path, [], 'v1.0');
+            $data = $this->graphResponseToArray($response);
+
+            foreach (($data['value'] ?? []) as $report) {
+                if (!empty($report['attendanceRecords']) && is_array($report['attendanceRecords'])) {
+                    $records = array_merge($records, $report['attendanceRecords']);
+                }
+            }
+
+            return $records;
+        }
     }
 
     public function getOnlineMeetingByVideoTeleconferenceId(string $meetingId): mixed
@@ -229,13 +253,8 @@ class GraphAPITeams
             '$top' => 999,
         ]);
 
-        try {
-            $response = $this->legacyRequest('GET', "places/microsoft.graph.room?$query", [], 'v1.0');
-            $data = $this->graphResponseToArray($response);
-        } catch (\Throwable $e) {
-            $response = $this->legacyRequest('GET', "places/microsoft.graph.room?$query", [], 'beta');
-            $data = $this->graphResponseToArray($response);
-        }
+        $response = $this->legacyRequest('GET', "places/microsoft.graph.room?$query", [], 'v1.0');
+        $data = $this->graphResponseToArray($response);
 
         foreach (($data['value'] ?? []) as $room) {
             $email = $room['emailAddress'] ?? null;
