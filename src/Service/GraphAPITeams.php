@@ -3,7 +3,10 @@
 namespace BCedric\UCAOffice365\Service;
 
 use Exception;
+use Microsoft\Graph\Generated\Communications\OnlineMeetings\OnlineMeetingsRequestBuilderGetRequestConfiguration;
+use Microsoft\Graph\Generated\Models\ReferenceCreate;
 use Microsoft\Graph\Generated\Models\OnlineMeeting;
+use Microsoft\Graph\Generated\Places\GraphRoom\GraphRoomRequestBuilderGetRequestConfiguration;
 use Microsoft\Graph\GraphServiceClient;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use GuzzleHttp\Client as GuzzleClient;
@@ -37,7 +40,6 @@ class GraphAPITeams
         } else if ($this->legacyAccessTokenExpireAt <= (time() + 30)) {
             $this->legacyGraph->setAccessToken($this->getLegacyAccessToken());
         }
-
         $this->legacyGraph->setApiVersion($version);
         return $this->legacyGraph;
     }
@@ -65,12 +67,18 @@ class GraphAPITeams
 
     public function addGroupMemberByUserId(string $groupId, string $userId): mixed
     {
-        $data = [
-            '@odata.id' => $this->graphAPI->userUrlPrefix . $userId,
-        ];
+        $client = $this->getGraphServiceClient();
+        $reference = new ReferenceCreate();
+        $reference->setOdataId($this->graphAPI->userUrlPrefix . $userId);
 
         try {
-            return $this->legacyRequest('POST', "groups/$groupId/members/\$ref", $data);
+            return $client
+                ->groups()
+                ->byGroupId($groupId)
+                ->members()
+                ->ref()
+                ->post($reference)
+                ->wait();
         } catch (\Throwable $e) {
             throw new Exception($e->getMessage(), (int)$e->getCode(), $e);
         }
@@ -150,24 +158,25 @@ class GraphAPITeams
         array $coOrganizerIds = [],
         ?string $roomEmail = null
     ): mixed {
-        $body = [
-            'subject' => $subject,
-        ];
+        $client = $this->getGraphServiceClient();
+        $meeting = new OnlineMeeting();
+        $meeting->setSubject($subject);
+        $additionalData = [];
 
         if (!empty($startTimestamp)) {
-            $body['startDateTime'] = gmdate('Y-m-d\\TH:i:s\\Z', $startTimestamp);
+            $meeting->setStartDateTime(gmdate('Y-m-d\\TH:i:s\\Z', $startTimestamp));
             $effectiveEnd = $endTimestamp ?: ($startTimestamp + 7200);
-            $body['endDateTime'] = gmdate('Y-m-d\\TH:i:s\\Z', $effectiveEnd);
+            $meeting->setEndDateTime(gmdate('Y-m-d\\TH:i:s\\Z', $effectiveEnd));
         } else if (!empty($endTimestamp)) {
-            $body['endDateTime'] = gmdate('Y-m-d\\TH:i:s\\Z', $endTimestamp);
+            $meeting->setEndDateTime(gmdate('Y-m-d\\TH:i:s\\Z', $endTimestamp));
         }
 
         if ($recordAutomatically) {
-            $body['recordAutomatically'] = true;
+            $additionalData['recordAutomatically'] = true;
         }
 
         if (!empty($coOrganizerIds)) {
-            $body['participants']['coOrganizers'] = array_map(static fn(string $id) => [
+            $additionalData['participants']['coOrganizers'] = array_map(static fn(string $id) => [
                 'identity' => [
                     'user' => ['id' => $id],
                 ],
@@ -175,15 +184,22 @@ class GraphAPITeams
         }
 
         if (!empty($roomEmail)) {
-            $body['participants']['attendees'][] = [
+            $additionalData['participants']['attendees'][] = [
                 'upn' => $roomEmail,
                 'role' => 'attendee',
             ];
         }
 
-        $response = $this->legacyRequest('POST', "users/$userId/onlineMeetings", $body, 'v1.0');
-        $data = $this->graphResponseToArray($response);
-        return $this->arrayToOnlineMeeting($data);
+        if (!empty($additionalData)) {
+            $meeting->setAdditionalData($additionalData);
+        }
+
+        return $client
+            ->users()
+            ->byUserId($userId)
+            ->onlineMeetings()
+            ->post($meeting)
+            ->wait();
     }
 
     public function getAttendanceRecords(string $organizerId, string $meetingId): array
@@ -228,37 +244,54 @@ class GraphAPITeams
 
     public function getOnlineMeetingByVideoTeleconferenceId(string $meetingId): mixed
     {
-        $query = http_build_query(['$filter' => "VideoTeleconferenceId eq '$meetingId'"]);
-        $response = $this->legacyRequest('GET', "communications/onlineMeetings?$query", [], 'v1.0');
-        $data = $this->graphResponseToArray($response);
-        $first = $data['value'][0] ?? null;
+        $client = $this->getGraphServiceClient();
+        $requestConfiguration = new OnlineMeetingsRequestBuilderGetRequestConfiguration();
+        $requestConfiguration->queryParameters = OnlineMeetingsRequestBuilderGetRequestConfiguration::createQueryParameters(
+            filter: "VideoTeleconferenceId eq '$meetingId'"
+        );
 
-        if (empty($first) || !is_array($first)) {
+        $meetings = $client
+            ->communications()
+            ->onlineMeetings()
+            ->get($requestConfiguration)
+            ->wait();
+
+        if (empty($meetings) || !method_exists($meetings, 'getValue')) {
             return null;
         }
 
-        return $this->arrayToOnlineMeeting($first);
+        $first = ($meetings->getValue() ?? [])[0] ?? null;
+        return $first ?: null;
     }
 
     public function deleteOnlineMeetingById(string $meetingId): mixed
     {
-        return $this->legacyRequest('DELETE', "communications/onlineMeetings/$meetingId", [], 'v1.0');
+        return $this->getGraphServiceClient()
+            ->communications()
+            ->onlineMeetings()
+            ->byOnlineMeetingId($meetingId)
+            ->delete()
+            ->wait();
     }
 
     public function getTeamsRooms(): array
     {
         $rooms = [];
-        $query = http_build_query([
-            '$select' => 'displayName,emailAddress',
-            '$top' => 999,
-        ]);
+        $requestConfiguration = new GraphRoomRequestBuilderGetRequestConfiguration();
+        $requestConfiguration->queryParameters = GraphRoomRequestBuilderGetRequestConfiguration::createQueryParameters(
+            select: ['displayName', 'emailAddress'],
+            top: 999
+        );
 
-        $response = $this->legacyRequest('GET', "places/microsoft.graph.room?$query", [], 'v1.0');
-        $data = $this->graphResponseToArray($response);
+        $response = $this->getGraphServiceClient()
+            ->places()
+            ->graphRoom()
+            ->get($requestConfiguration)
+            ->wait();
 
-        foreach (($data['value'] ?? []) as $room) {
-            $email = $room['emailAddress'] ?? null;
-            $name = $room['displayName'] ?? $email;
+        foreach (($response?->getValue() ?? []) as $room) {
+            $email = method_exists($room, 'getEmailAddress') ? $room->getEmailAddress() : null;
+            $name = method_exists($room, 'getDisplayName') ? $room->getDisplayName() : $email;
             if (!empty($email)) {
                 $rooms[(string)$email] = (string)$name;
             }
