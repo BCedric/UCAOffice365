@@ -9,15 +9,9 @@ use Microsoft\Graph\Generated\Models\OnlineMeeting;
 use Microsoft\Graph\Generated\Places\GraphRoom\GraphRoomRequestBuilderGetRequestConfiguration;
 use Microsoft\Graph\GraphServiceClient;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
-use GuzzleHttp\Client as GuzzleClient;
-use League\OAuth2\Client\Provider\GenericProvider;
 
 class GraphAPITeams
 {
-    private ?\Microsoft\Graph\Graph $legacyGraph = null;
-    private ?string $legacyAccessToken = null;
-    private int $legacyAccessTokenExpireAt = 0;
-
     public function __construct(
         private readonly GraphAPI $graphAPI,
         #[Autowire(env: 'GRAPH_TENANT')] private readonly string $tenantId,
@@ -32,18 +26,6 @@ class GraphAPITeams
         return $this->graphAPI->getGraphServiceClient();
     }
 
-    public function getLegacyGraph(string $version = 'v1.0')
-    {
-        if ($this->legacyGraph === null) {
-            $this->legacyGraph = new \Microsoft\Graph\Graph();
-            $this->legacyGraph->setAccessToken($this->getLegacyAccessToken());
-        } else if ($this->legacyAccessTokenExpireAt <= (time() + 30)) {
-            $this->legacyGraph->setAccessToken($this->getLegacyAccessToken());
-        }
-        $this->legacyGraph->setApiVersion($version);
-        return $this->legacyGraph;
-    }
-
     public function legacyRequest(
         string $method,
         string $url,
@@ -51,18 +33,11 @@ class GraphAPITeams
         string $version = 'v1.0',
         ?string $returntype = null
     ): mixed {
-        $graph = $this->getLegacyGraph($version);
-        $path = $this->normalizeGraphPath($url);
-
-        $request = $graph->createRequest(strtoupper($method), $path);
-        if (!empty($returntype)) {
-            $request->setReturnType($returntype);
+        $data = $this->graphAPI->rawJsonRequest($method, $url, !empty($body) ? $body : null, $version);
+        if ($returntype === OnlineMeeting::class && is_array($data)) {
+            return $this->arrayToOnlineMeeting($data);
         }
-        if (!empty($body)) {
-            $request->attachBody($body);
-        }
-
-        return $request->execute();
+        return $data;
     }
 
     public function addGroupMemberByUserId(string $groupId, string $userId): mixed
@@ -128,12 +103,10 @@ class GraphAPITeams
         } catch (\Throwable $e) {
             // Keep a robust fallback for older/generated SDK edge cases.
             $set = [];
-            $graph = $this->getLegacyGraph('v1.0');
             $path = "/groups/$groupId/members?\$select=id&\$top=999";
 
             while (!empty($path)) {
-                $response = $graph->createRequest('GET', $path)->execute();
-                $data = $this->graphResponseToArray($response);
+                $data = $this->graphAPI->rawJsonRequest('GET', $path);
 
                 foreach (($data['value'] ?? []) as $member) {
                     $id = $member['id'] ?? null;
@@ -300,17 +273,6 @@ class GraphAPITeams
         return $rooms;
     }
 
-    private function normalizeGraphPath(string $url): string
-    {
-        if ($url === '') {
-            return '/';
-        }
-        if (str_starts_with($url, 'http://') || str_starts_with($url, 'https://')) {
-            return $url;
-        }
-        return str_starts_with($url, '/') ? $url : '/' . $url;
-    }
-
     private function graphResponseToArray(mixed $response): array
     {
         if (is_array($response)) {
@@ -352,46 +314,5 @@ class GraphAPITeams
 
         $meeting->setAdditionalData($data);
         return $meeting;
-    }
-
-    private function getLegacyAccessToken(): string
-    {
-        if (!empty($this->legacyAccessToken) && $this->legacyAccessTokenExpireAt > (time() + 30)) {
-            return $this->legacyAccessToken;
-        }
-
-        $config = [
-            'verify' => true,
-            'timeout' => 30,
-        ];
-
-        if (!empty($this->proxyUrl)) {
-            $config['proxy'] = [
-                'http' => $this->proxyUrl,
-                'https' => $this->proxyUrl,
-            ];
-        }
-
-        $provider = new GenericProvider([
-            'clientId' => $this->clientId,
-            'clientSecret' => $this->clientSecret,
-            'redirectUri' => '',
-            'urlAuthorize' => "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/authorize",
-            'urlAccessToken' => "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/token",
-            'urlResourceOwnerDetails' => 'https://graph.microsoft.com/oidc/userinfo',
-            'scopes' => 'https://graph.microsoft.com/.default',
-            'verify' => true,
-            'timeout' => 30,
-        ], [
-            'httpClient' => new GuzzleClient($config),
-        ]);
-
-        $token = $provider->getAccessToken('client_credentials', [
-            'scope' => 'https://graph.microsoft.com/.default',
-        ]);
-
-        $this->legacyAccessToken = $token->getToken();
-        $this->legacyAccessTokenExpireAt = (int)($token->getExpires() ?? (time() + 3000));
-        return $this->legacyAccessToken;
     }
 }
