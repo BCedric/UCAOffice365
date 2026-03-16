@@ -3,28 +3,20 @@
 namespace BCedric\UCAOffice365\Service;
 
 use Exception;
-use Microsoft\Graph\Core\Authentication\GraphPhpLeagueAccessTokenProvider;
-use Microsoft\Graph\Core\GraphClientFactory;
-use Microsoft\Graph\Generated\Models\Group;
 use Microsoft\Graph\Generated\Models\OnlineMeeting;
-use Microsoft\Graph\Generated\Models\User;
-use Microsoft\Graph\GraphRequestAdapter;
 use Microsoft\Graph\GraphServiceClient;
-use Microsoft\Kiota\Authentication\Oauth\ClientCredentialContext;
-use Microsoft\Kiota\Authentication\PhpLeagueAuthenticationProvider;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use GuzzleHttp\Client as GuzzleClient;
 use League\OAuth2\Client\Provider\GenericProvider;
 
 class GraphAPITeams
 {
-    private ?GraphServiceClient $graphServiceClient = null;
     private ?\Microsoft\Graph\Graph $legacyGraph = null;
     private ?string $legacyAccessToken = null;
     private int $legacyAccessTokenExpireAt = 0;
-    public string $userUrlPrefix = 'https://graph.microsoft.com/v1.0/users/';
 
     public function __construct(
+        private readonly GraphAPI $graphAPI,
         #[Autowire(env: 'GRAPH_TENANT')] private readonly string $tenantId,
         #[Autowire(env: 'GRAPH_CLIENT')] private readonly string $clientId,
         #[Autowire(env: 'GRAPH_CLIENT_SECRET')] private readonly string $clientSecret,
@@ -34,68 +26,7 @@ class GraphAPITeams
 
     public function getGraphServiceClient(): GraphServiceClient
     {
-        if (is_null($this->graphServiceClient)) {
-            $tokenRequestContext = new ClientCredentialContext(
-                $this->tenantId,
-                $this->clientId,
-                $this->clientSecret
-            );
-
-            $config = [
-                'verify' => true,
-                'timeout' => 30,
-            ];
-
-            if (!empty($this->proxyUrl)) {
-                $config['proxy'] = [
-                    'http' => $this->proxyUrl,
-                    'https' => $this->proxyUrl,
-                ];
-            }
-
-            $httpClient = GraphClientFactory::createWithConfig($config);
-            $guzzleClientForOAuth = new GuzzleClient($config);
-            $providerOptions = [
-                'clientId' => $this->clientId,
-                'clientSecret' => $this->clientSecret,
-                'redirectUri' => '',
-                'urlAuthorize' => "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/authorize",
-                'urlAccessToken' => "https://login.microsoftonline.com/{$this->tenantId}/oauth2/v2.0/token",
-                'urlResourceOwnerDetails' => 'https://graph.microsoft.com/oidc/userinfo',
-                'scopes' => 'https://graph.microsoft.com/.default',
-                'verify' => true,
-                'timeout' => 30,
-            ];
-
-            if (!empty($this->proxyUrl)) {
-                $providerOptions['proxy'] = [
-                    'http' => $this->proxyUrl,
-                    'https' => $this->proxyUrl,
-                ];
-            }
-
-            $oauthProvider = new GenericProvider($providerOptions, [
-                'httpClient' => $guzzleClientForOAuth,
-            ]);
-
-            $accessTokenProvider = new GraphPhpLeagueAccessTokenProvider(
-                $tokenRequestContext,
-                ['https://graph.microsoft.com/.default'],
-                \Microsoft\Graph\Core\NationalCloud::GLOBAL,
-                null,
-                $oauthProvider
-            );
-
-            $authProvider = PhpLeagueAuthenticationProvider::createWithAccessTokenProvider($accessTokenProvider);
-            $this->graphServiceClient = GraphServiceClient::createWithRequestAdapter(
-                new GraphRequestAdapter(
-                    $authProvider,
-                    $httpClient
-                )
-            );
-        }
-
-        return $this->graphServiceClient;
+        return $this->graphAPI->getGraphServiceClient();
     }
 
     public function getLegacyGraph(string $version = 'v1.0')
@@ -135,7 +66,7 @@ class GraphAPITeams
     public function addGroupMemberByUserId(string $groupId, string $userId): mixed
     {
         $data = [
-            '@odata.id' => $this->userUrlPrefix . $userId,
+            '@odata.id' => $this->graphAPI->userUrlPrefix . $userId,
         ];
 
         try {
@@ -147,119 +78,27 @@ class GraphAPITeams
 
     public function getUserId(string $email): ?string
     {
-        $email = strtolower(trim($email));
-        if ($email === '') {
-            return null;
-        }
-
-        $response = $this->legacyRequest('GET', "users/$email?\$select=id");
-        $data = $this->graphResponseToArray($response);
-        if (!empty($data['id'])) {
-            return (string)$data['id'];
-        }
-
-        $query = http_build_query([
-            '$filter' => "userPrincipalName eq '$email' or mail eq '$email'",
-        ]);
-        $fallback = $this->legacyRequest('GET', "users?$query", [], 'v1.0', User::class);
-
-        if (is_array($fallback) && isset($fallback[0]) && method_exists($fallback[0], 'getId')) {
-            return $fallback[0]->getId();
-        }
-
-        $arr = $this->graphResponseToArray($fallback);
-        return $arr['value'][0]['id'] ?? null;
+        return $this->graphAPI->getUserId($email);
     }
 
     public function createTeam(string $groupId, array $memberSettings = []): mixed
     {
-        $parameters = ['memberSettings' => $memberSettings];
-        if (empty($parameters['memberSettings'])) {
-            $parameters['memberSettings'] = [
-                'allowCreateUpdateChannels' => false,
-                'allowDeleteChannels' => false,
-                'allowAddRemoveApps' => false,
-                'allowCreateUpdateRemoveTabs' => false,
-                'allowCreateUpdateRemoveConnectors' => false,
-            ];
-        }
-
-        return $this->legacyRequest(
-            'PUT',
-            "/groups/$groupId/team",
-            json_decode(json_encode($parameters), true),
-            'v1.0',
-            Group::class
-        );
+        return $this->graphAPI->createTeam($groupId, $memberSettings);
     }
 
     public function createGroup(string $name, string $description, array|string $ownersId): ?string
     {
-        $users = [];
-        foreach ((array)$ownersId as $ownerId) {
-            $users[] = $this->userUrlPrefix . $ownerId;
-        }
-
-        $group = new Group();
-        $group->setDisplayName($name);
-        $group->setMailNickname(preg_replace('/[^A-Za-z0-9]/', '', $name) . uniqid());
-        $group->setDescription($description);
-        $group->setVisibility('Private');
-        $group->setGroupTypes(['Unified']);
-        $group->setMailEnabled(true);
-        $group->setSecurityEnabled(false);
-        $group->setOwners($users);
-        $group->setMembers($users);
-
-        $data = $group->jsonSerialize();
-        $data['owners@odata.bind'] = $data['owners'];
-        $data['members@odata.bind'] = $data['members'];
-        $data['resourceBehaviorOptions'] = ['WelcomeEmailDisabled'];
-
-        unset($data['owners'], $data['members']);
-
-        $response = $this->legacyRequest('POST', '/groups', $data, 'v1.0', Group::class);
-        return method_exists($response, 'getId') ? $response->getId() : null;
+        return $this->graphAPI->createGroup($name, $description, $ownersId);
     }
 
     public function readTeam(string $groupId): mixed
     {
-        return $this->legacyRequest('GET', "/groups/$groupId/team", [], 'v1.0', Group::class);
+        return $this->graphAPI->readTeam($groupId);
     }
 
     public function copyTeam(string $team, string $name, string $description, array|string $ownersId): mixed
     {
-        $users = [];
-        foreach ((array)$ownersId as $ownerId) {
-            $users[] = $this->userUrlPrefix . $ownerId;
-        }
-
-        $group = new Group();
-        $group->setDisplayName($name);
-        $group->setMailNickname(preg_replace('/[^A-Za-z0-9]/', '', $name) . uniqid());
-        $group->setDescription($description);
-        $group->setVisibility('Private');
-        $group->setOwners($users);
-
-        $data = $group->jsonSerialize();
-        $data['partsToClone'] = 'apps,tabs,settings,channels';
-        $data['resourceBehaviorOptions'] = ['WelcomeEmailDisabled'];
-        unset($data['owners']);
-
-        $response = $this->legacyRequest('POST', "/teams/$team/clone", $data);
-
-        if ($response && method_exists($response, 'getHeaders')) {
-            $headers = $response->getHeaders();
-            if (!empty($headers['Location'][0])) {
-                $location = $headers['Location'][0];
-                $teamid = explode("'", explode('/', $location)[1])[1] ?? null;
-                if (!empty($teamid)) {
-                    return $this->readTeam((string)$teamid);
-                }
-            }
-        }
-
-        return $response;
+        return $this->graphAPI->copyTeam($team, $name, $description, $ownersId);
     }
 
     public function listGroupMemberIdSet(string $groupId): array
